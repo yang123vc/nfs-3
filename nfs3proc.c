@@ -26,6 +26,8 @@
 
 #define NFSDBG_FACILITY		NFSDBG_PROC
 
+int nfs_zql_control = 10;
+
 /* A wrapper to handle the EJUKEBOX error messages */
 static int
 nfs3_rpc_wrapper(struct rpc_clnt *clnt, struct rpc_message *msg, int flags)

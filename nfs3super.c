@@ -21,12 +21,14 @@ struct nfs_subversion nfs_v3 = {
 static int __init init_nfs_v3(void)
 {
 	register_nfs_version(&nfs_v3);
+	nfs3_register_sysctl();
 	return 0;
 }
 
 static void __exit exit_nfs_v3(void)
 {
 	unregister_nfs_version(&nfs_v3);
+	nfs3_unregister_sysctl();
 }
 
 MODULE_LICENSE("GPL");

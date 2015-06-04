@@ -28,6 +28,13 @@ static struct ctl_table nfs_cb_sysctls[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+	/*{
+		.procname	= "nfs_zql_control",
+		.data		= &nfs_zql_control,
+		.maxlen		= sizeof(nfs_zql_control),
+		.mode		= 0644,
+		.proc_handler	= proc_dointvec,
+	},*/
 	{ }
 };
 

@@ -16,7 +16,7 @@ obj-$(CONFIG_NFS_V2) += nfsv2.o
 nfsv2-y := nfs2super.o proc.o nfs2xdr.o
 
 obj-$(CONFIG_NFS_V3) += nfsv3.o
-nfsv3-y := nfs3super.o nfs3client.o nfs3proc.o nfs3xdr.o
+nfsv3-y := nfs3super.o nfs3client.o nfs3proc.o nfs3xdr.o nfs3sysctl.o
 nfsv3-$(CONFIG_NFS_V3_ACL) += nfs3acl.o
 
 obj-$(CONFIG_NFS_V4) += nfsv4.o
