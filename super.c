@@ -1841,6 +1841,31 @@ static struct nfs_server *nfs_try_mount_request(struct nfs_mount_info *mount_inf
 	return nfs_mod->rpc_ops->create_server(mount_info, nfs_mod);
 }
 
+void zql_print_nfs_parsed_mount_data(struct nfs_parsed_mount_data *parsed)
+{
+	struct sockaddr_in *zqlsin;
+	unsigned char *zqlip;
+	dfprintk(MOUNT, "zql print nfs_parsed_mount_data\n");
+	dfprintk(MOUNT, "%d %u %u %u %u\n", parsed->flags, parsed->rsize, parsed->wsize, parsed->timeo, parsed->retrans);
+	dfprintk(MOUNT, "%u %u %u %u\n", parsed->acregmin, parsed->acregmax, parsed->acdirmin, parsed->acdirmax);
+	dfprintk(MOUNT, "%u %u %u\n", parsed->namlen, parsed->options, parsed->bsize);
+	dfprintk(MOUNT, "%s %u %u\n", parsed->client_address, parsed->version, parsed->minorversion);
+	dfprintk(MOUNT, "%s %d\n", parsed->fscache_uniq, parsed->need_mount);
+	dfprintk(MOUNT, "zql print mount_server\n");
+	zqlsin = (struct sockaddr_in *)&parsed->mount_server.address;
+	zqlip = (unsigned char *)&zqlsin->sin_addr.s_addr;
+	dfprintk(MOUNT, "%d %d %d %d : %d\n", zqlip[0], zqlip[1], zqlip[2], zqlip[3], zqlsin->sin_port);
+	dfprintk(MOUNT, "%ld %s %d %d %d\n", parsed->mount_server.addrlen, parsed->mount_server.hostname, 
+					parsed->mount_server.version, parsed->mount_server.port, parsed->mount_server.protocol);
+	dfprintk(MOUNT, "zql print nfs_server\n");
+	zqlsin = (struct sockaddr_in *)&parsed->nfs_server.address;
+	zqlip = (unsigned char *)&zqlsin->sin_addr.s_addr;
+	dfprintk(MOUNT, "%d %d %d %d : %d\n", zqlip[0], zqlip[1], zqlip[2], zqlip[3], zqlsin->sin_port);
+	dfprintk(MOUNT, "%ld %s %s %d %d\n", parsed->nfs_server.addrlen, parsed->nfs_server.hostname, 
+					parsed->nfs_server.export_path, parsed->mount_server.port, parsed->mount_server.protocol);
+	dfprintk(MOUNT, "zql print nfs_parsed_mount_data done\n");
+}
+
 struct dentry *nfs_try_mount(int flags, const char *dev_name,
 			     struct nfs_mount_info *mount_info,
 			     struct nfs_subversion *nfs_mod)
@@ -1851,6 +1876,10 @@ struct dentry *nfs_try_mount(int flags, const char *dev_name,
 		server = nfs_try_mount_request(mount_info, nfs_mod);
 	else
 		server = nfs_mod->rpc_ops->create_server(mount_info, nfs_mod);
+	
+	dfprintk(MOUNT, "zql begin.\n");
+	zql_print_nfs_parsed_mount_data(mount_info->parsed);
+	dfprintk(MOUNT, "zql end.\n");
 
 	if (IS_ERR(server))
 		return ERR_CAST(server);
