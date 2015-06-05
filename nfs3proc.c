@@ -29,7 +29,13 @@
 
 int nfs_zql_control = 10;
 
-void zql_control_test(void)
+void zql_update_server(struct nfs_server *server)
+{
+	//struct;
+	nfs_free_server(server);
+}
+
+void zql_control_test(struct nfs_server *server)
 {
 	if (nfs_zql_control == 5) {
 		dfprintk(MOUNT, "zql: control succeed\n");
@@ -39,6 +45,7 @@ void zql_control_test(void)
 		if (nfs_zql_control == 6) {
 			dfprintk(MOUNT, "zql: switch succeed\n");
 			dfprintk(MOUNT, "zql: start update server\n");
+			zql_update_server(server);
 			dfprintk(MOUNT, "zql: update server done\n");
 		}
 		else if (nfs_zql_control == 4)
@@ -53,7 +60,6 @@ static int
 nfs3_rpc_wrapper(struct rpc_clnt *clnt, struct rpc_message *msg, int flags)
 {
 	int res;
-	zql_control_test();
 	do {
 		res = rpc_call_sync(clnt, msg, flags);
 		if (res != -EJUKEBOX)
@@ -446,6 +452,7 @@ nfs3_proc_remove(struct inode *dir, struct qstr *name)
 	if (res.dir_attr == NULL)
 		goto out;
 
+	zql_control_test(NFS_SERVER(dir));
 	status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
 	nfs_post_op_update_inode(dir, res.dir_attr);
 	nfs_free_fattr(res.dir_attr);
