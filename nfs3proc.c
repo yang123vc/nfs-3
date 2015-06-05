@@ -19,6 +19,7 @@
 #include <linux/nfs_mount.h>
 #include <linux/freezer.h>
 #include <linux/xattr.h>
+#include <linux/delay.h>
 
 #include "iostat.h"
 #include "internal.h"
@@ -31,7 +32,19 @@ int nfs_zql_control = 10;
 void zql_control_test(void)
 {
 	if (nfs_zql_control == 5) {
-		dfprintk(MOUNT, "zql control succeed\n");
+		dfprintk(MOUNT, "zql: control succeed\n");
+		while (nfs_zql_control == 5) {
+			msleep_interruptible(500);
+		}
+		if (nfs_zql_control == 6) {
+			dfprintk(MOUNT, "zql: switch succeed\n");
+			dfprintk(MOUNT, "zql: start update server\n");
+			dfprintk(MOUNT, "zql: update server done\n");
+		}
+		else if (nfs_zql_control == 4)
+			dfprintk(MOUNT, "zql: switch failed\n");
+		else
+			dfprintk(MOUNT, "zql: unknown failure\n");
 	}
 }
 
