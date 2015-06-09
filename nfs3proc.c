@@ -20,22 +20,264 @@
 #include <linux/freezer.h>
 #include <linux/xattr.h>
 #include <linux/delay.h>
+#include <linux/sunrpc/addr.h>
 
 #include "iostat.h"
 #include "internal.h"
 #include "nfs3_fs.h"
+#include "nfs.h"
 
 #define NFSDBG_FACILITY		NFSDBG_PROC
 
 int nfs_zql_control = 10;
 
-void zql_update_server(struct nfs_server *server)
+static struct nfs_parsed_mount_data *nfs_alloc_parsed_mount_data(void)
 {
-	//struct;
-	nfs_free_server(server);
+	struct nfs_parsed_mount_data *data;
+
+	data = kzalloc(sizeof(*data), GFP_KERNEL);
+	if (data) {
+		data->acregmin		= NFS_DEF_ACREGMIN;
+		data->acregmax		= NFS_DEF_ACREGMAX;
+		data->acdirmin		= NFS_DEF_ACDIRMIN;
+		data->acdirmax		= NFS_DEF_ACDIRMAX;
+		data->mount_server.port	= NFS_UNSPEC_PORT;
+		data->nfs_server.port	= NFS_UNSPEC_PORT;
+		data->nfs_server.protocol = XPRT_TRANSPORT_TCP;
+		data->selected_flavor	= RPC_AUTH_MAXFLAVOR;
+		data->minorversion	= 0;
+		data->need_mount	= true;
+		data->net		= current->nsproxy->net_ns;
+		security_init_mnt_opts(&data->lsm_opts);
+	}
+	return data;
 }
 
-void zql_control_test(struct nfs_server *server)
+static void nfs_free_parsed_mount_data(struct nfs_parsed_mount_data *data)
+{
+	if (data) {
+		kfree(data->client_address);
+		kfree(data->mount_server.hostname);
+		kfree(data->nfs_server.export_path);
+		kfree(data->nfs_server.hostname);
+		kfree(data->fscache_uniq);
+		security_free_mnt_opts(&data->lsm_opts);
+		kfree(data);
+	}
+}
+
+static int nfs_verify_server_address(struct sockaddr *addr)
+{
+	switch (addr->sa_family) {
+	case AF_INET: {
+		struct sockaddr_in *sa = (struct sockaddr_in *)addr;
+		return sa->sin_addr.s_addr != htonl(INADDR_ANY);
+	}
+	case AF_INET6: {
+		struct in6_addr *sa = &((struct sockaddr_in6 *)addr)->sin6_addr;
+		dfprintk(MOUNT, "zql: nfs_verify_server_address AF_INET6 error\n");
+		return !ipv6_addr_any(sa);
+	}
+	}
+
+	dfprintk(MOUNT, "NFS: Invalid IP address specified\n");
+	return 0;
+}
+
+static void nfs_validate_transport_protocol(struct nfs_parsed_mount_data *mnt)
+{
+	switch (mnt->nfs_server.protocol) {
+	case XPRT_TRANSPORT_UDP:
+	case XPRT_TRANSPORT_TCP:
+	case XPRT_TRANSPORT_RDMA:
+		break;
+	default:
+		mnt->nfs_server.protocol = XPRT_TRANSPORT_TCP;
+	}
+}
+
+static void nfs_set_mount_transport_protocol(struct nfs_parsed_mount_data *mnt)
+{
+	nfs_validate_transport_protocol(mnt);
+
+	if (mnt->mount_server.protocol == XPRT_TRANSPORT_UDP ||
+	    mnt->mount_server.protocol == XPRT_TRANSPORT_TCP)
+			return;
+	switch (mnt->nfs_server.protocol) {
+	case XPRT_TRANSPORT_UDP:
+		mnt->mount_server.protocol = XPRT_TRANSPORT_UDP;
+		break;
+	case XPRT_TRANSPORT_TCP:
+	case XPRT_TRANSPORT_RDMA:
+		mnt->mount_server.protocol = XPRT_TRANSPORT_TCP;
+	}
+}
+
+static void nfs_set_port(struct sockaddr *sap, int *port,
+				 const unsigned short default_port)
+{
+	if (*port == NFS_UNSPEC_PORT)
+		*port = default_port;
+
+	rpc_set_port(sap, *port);
+}
+
+static int migrate_nfs_validate_text_mount_data(void *options,
+					struct nfs_parsed_mount_data *args,
+					const char *dev_name)
+{
+	int port = 0;
+	//int max_namelen = PAGE_SIZE;
+	//int max_pathlen = NFS_MAXPATHLEN;
+	struct sockaddr *sap = (struct sockaddr *)&args->nfs_server.address;
+	char mnt_addr[] = "162.105.146.169";
+	char mnt_hostname[] = "162.105.146.169";
+	char mnt_dirpath[] = "/home/disk1";
+
+	//if (nfs_parse_mount_options((char *)options, args) == 0)
+	//	return -EINVAL;
+	/* security_sb_parse_opts_str() */
+	/* address */
+	args->nfs_server.addrlen = 
+		rpc_pton(args->net, mnt_addr, strlen(mnt_addr),
+			(struct sockaddr *)
+			&args->nfs_server.address,
+			sizeof(args->nfs_server.address));
+	if (args->nfs_server.addrlen == 0)
+		dfprintk(MOUNT, "zql: invalid address\n");
+	/* version vers=3 */
+	args->flags |= NFS_MOUNT_VER3;
+	args->version = 3;
+	/* proto=tcp, Opt_xprt_tcp */
+	args->flags |= NFS_MOUNT_TCP;
+	args->nfs_server.protocol = XPRT_TRANSPORT_TCP;
+	/* mountvers=3 */
+	args->mount_server.version = 3;
+	/* mountproto=udp */
+	args->mount_server.protocol = XPRT_TRANSPORT_UDP;
+	/* mountport=20048 */
+	args->mount_server.port = 20048;
+
+	if (!nfs_verify_server_address(sap))
+		goto out_no_address;
+
+	if (args->version == 4) {
+		dfprintk(MOUNT, "zql: version 4 error not supported\n");
+	} else
+		nfs_set_mount_transport_protocol(args);
+
+	nfs_set_port(sap, &args->nfs_server.port, port);
+
+	//return nfs_parse_devname(dev_name,
+	//			   &args->nfs_server.hostname,
+	//			   max_namelen,
+	//			   &args->nfs_server.export_path,
+	//			   max_pathlen);
+	args->nfs_server.hostname = kstrndup(mnt_hostname, strlen(mnt_hostname), GFP_KERNEL);
+	args->nfs_server.export_path = kstrndup(mnt_dirpath, strlen(mnt_dirpath), GFP_KERNEL);
+	return 0;
+
+out_no_address:
+	dfprintk(MOUNT, "zql: NFS: mount program didn't pass remote address\n");
+	return -EINVAL;
+}
+
+static void migrate_generate_new_nfs_server(struct nfs_server *server)
+{
+	/* since we use the original server directly, the parameters that 
+	 * need to be copied through nfs_server_copy_userdata() are not 
+	 * needed any more */
+	//nfs_server_copy_userdata();
+	/* the following initialization is not necessarily needed */
+	server->nfs_client = NULL;
+	server->client = NULL;
+	server->client_acl = NULL;
+	server->nlm_host = NULL;
+	server->io_stats = NULL;
+}
+
+static void migrate_nfs_set_client(struct nfs_server *server,
+					const struct nfs_parsed_mount_data *data,
+					struct nfs_subversion *nfs_mod,
+					struct rpc_timeout *timeparms)
+{
+	struct nfs_client_initdata cl_init = {
+		.hostname = data->nfs_server.hostname,
+		.addr = (const struct sockaddr *)&data->nfs_server.address,
+		.addrlen = data->nfs_server.addrlen,
+		.nfs_mod = nfs_mod,
+		.proto = data->nfs_server.protocol,
+		.net = data->net,
+	};
+	struct nfs_client *clp;
+	int error;
+
+	/* init timeparms */
+	//struct rpc_timeout timeparms;
+	//nfs_init_timeout_values(&timeparms, data->nfs_server.protocol,
+	//		data->timeo, data->retrans);
+
+	dfprintk(MOUNT, "zql: migrate_nfs_set_client\n");
+
+	if (server->flags & NFS_MOUNT_NORESVPORT)
+		set_bit(NFS_CS_NORESVPORT, &cl_init.init_flags);
+	//if (server->options & NFS_OPTION_MIGRATION)
+		//set_bit(NFS_CS_MIGRATION, &cl_init.init_flags);
+	
+	clp = nfs_get_client(&cl_init, timeparms, NULL, RPC_AUTH_UNIX);
+	if (IS_ERR(clp)) {
+		error = PTR_ERR(clp);
+		dfprintk(MOUNT, "zql: nfs_get_client error\n");
+	}
+
+	server->nfs_client = clp;
+	//set_bit(NFS_CS_CHECK_LEASE_TIME, &clp->cl_res_state);
+	
+
+	dfprintk(MOUNT, "zql: migrate_nfs_set_client done\n");
+	return;
+}
+
+static void zql_update_server(struct nfs_server *server)
+{
+	/* 
+	 * we do not have to free server, 
+	 * instead, we only update struct nfs_server.
+	 */
+	//nfs_free_server(server);
+	/* free old nfs_client, though we can leave it there and use it when switch back */
+	//server->nfs_client->rpc_ops->free_client(server->nfs_client);
+	struct nfs_server parent_server;
+	struct nfs_client *parent_client;
+	struct nfs_subversion *nfs_mod;
+	struct nfs_parsed_mount_data *parsed;
+	char *dev_name = NULL;
+
+	char raw_data[] = "addr=162.105.146.169,vers=3,proto=tcp,mountvers=3,mountproto=udp,mountport=20048";
+
+	/* keep old server parameter, copy original server to a temporary parameter */
+	parent_server = *server;
+	parent_client = parent_server.nfs_client;
+	/* generate new nfs_server, set several pointers as NULL */
+	migrate_generate_new_nfs_server(server);
+
+	/* generate nfs_parsed_mount_data */
+	parsed = nfs_alloc_parsed_mount_data();
+	if (parsed == NULL)
+		dfprintk(MOUNT, "zql: nfs_alloc_parsed_mount_data error\n");
+	migrate_nfs_validate_text_mount_data(raw_data, parsed, dev_name);
+
+	nfs_mod = get_nfs_version(parsed->version);
+	migrate_nfs_set_client(server, parsed, nfs_mod, parent_server.client->cl_timeout);
+
+	nfs_init_server_rpcclient(server, parent_server.client->cl_timeout, parsed->selected_flavor);
+
+	nfs_free_parsed_mount_data(parsed);
+
+	return;
+}
+
+static void zql_control_test(struct nfs_server *server)
 {
 	if (nfs_zql_control == 5) {
 		dfprintk(MOUNT, "zql: control succeed\n");
