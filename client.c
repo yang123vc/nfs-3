@@ -114,6 +114,7 @@ struct nfs_subversion *get_nfs_version(unsigned int version)
 		return ERR_PTR(-EAGAIN);
 	return nfs;
 }
+EXPORT_SYMBOL_GPL(get_nfs_version);
 
 void put_nfs_version(struct nfs_subversion *nfs)
 {

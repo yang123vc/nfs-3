@@ -122,9 +122,9 @@ static void nfs_set_port(struct sockaddr *sap, int *port,
 	rpc_set_port(sap, *port);
 }
 
-static int migrate_nfs_validate_text_mount_data(void *options,
-					struct nfs_parsed_mount_data *args,
-					const char *dev_name)
+static int migrate_nfs_validate_text_mount_data(/*void *options,*/
+					struct nfs_parsed_mount_data *args/*,
+					const char *dev_name*/)
 {
 	int port = 0;
 	//int max_namelen = PAGE_SIZE;
@@ -199,7 +199,7 @@ static void migrate_generate_new_nfs_server(struct nfs_server *server)
 static void migrate_nfs_set_client(struct nfs_server *server,
 					const struct nfs_parsed_mount_data *data,
 					struct nfs_subversion *nfs_mod,
-					struct rpc_timeout *timeparms)
+					const struct rpc_timeout *timeparms)
 {
 	struct nfs_client_initdata cl_init = {
 		.hostname = data->nfs_server.hostname,
@@ -251,9 +251,9 @@ static void zql_update_server(struct nfs_server *server)
 	struct nfs_client *parent_client;
 	struct nfs_subversion *nfs_mod;
 	struct nfs_parsed_mount_data *parsed;
-	char *dev_name = NULL;
+	//char *dev_name = NULL;
 
-	char raw_data[] = "addr=162.105.146.169,vers=3,proto=tcp,mountvers=3,mountproto=udp,mountport=20048";
+	//char raw_data[] = "addr=162.105.146.169,vers=3,proto=tcp,mountvers=3,mountproto=udp,mountport=20048";
 
 	/* keep old server parameter, copy original server to a temporary parameter */
 	parent_server = *server;
@@ -265,7 +265,7 @@ static void zql_update_server(struct nfs_server *server)
 	parsed = nfs_alloc_parsed_mount_data();
 	if (parsed == NULL)
 		dfprintk(MOUNT, "zql: nfs_alloc_parsed_mount_data error\n");
-	migrate_nfs_validate_text_mount_data(raw_data, parsed, dev_name);
+	migrate_nfs_validate_text_mount_data(/*raw_data, */parsed/*, dev_name*/);
 
 	nfs_mod = get_nfs_version(parsed->version);
 	migrate_nfs_set_client(server, parsed, nfs_mod, parent_server.client->cl_timeout);

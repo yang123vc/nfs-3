@@ -1872,6 +1872,10 @@ struct dentry *nfs_try_mount(int flags, const char *dev_name,
 {
 	struct nfs_server *server;
 
+	dfprintk(MOUNT, "zql pre begin.\n");
+	zql_print_nfs_parsed_mount_data(mount_info->parsed);
+	dfprintk(MOUNT, "zql pre end.\n");
+
 	if (mount_info->parsed->need_mount)
 		server = nfs_try_mount_request(mount_info, nfs_mod);
 	else
