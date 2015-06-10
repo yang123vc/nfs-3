@@ -366,6 +366,7 @@ nfs3_proc_get_root(struct nfs_server *server, struct nfs_fh *fhandle,
 {
 	int	status;
 
+	zql_control_test(server);
 	status = do_proc_get_root(server->client, fhandle, info);
 	if (status && server->nfs_client->cl_rpcclient != server->client)
 		status = do_proc_get_root(server->nfs_client->cl_rpcclient, fhandle, info);
@@ -388,6 +389,7 @@ nfs3_proc_getattr(struct nfs_server *server, struct nfs_fh *fhandle,
 
 	dprintk("NFS call  getattr\n");
 	nfs_fattr_init(fattr);
+	zql_control_test(server);
 	status = rpc_call_sync(server->client, &msg, 0);
 	dprintk("NFS reply getattr: %d\n", status);
 	return status;
@@ -413,6 +415,7 @@ nfs3_proc_setattr(struct dentry *dentry, struct nfs_fattr *fattr,
 	if (sattr->ia_valid & ATTR_FILE)
 		msg.rpc_cred = nfs_file_cred(sattr->ia_file);
 	nfs_fattr_init(fattr);
+	zql_control_test(NFS_SERVER(inode));
 	status = rpc_call_sync(NFS_CLIENT(inode), &msg, 0);
 	if (status == 0)
 		nfs_setattr_update_inode(inode, sattr, fattr);
@@ -447,6 +450,7 @@ nfs3_proc_lookup(struct inode *dir, struct qstr *name,
 		return -ENOMEM;
 
 	nfs_fattr_init(fattr);
+	zql_control_test(NFS_SERVER(dir));
 	status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
 	nfs_refresh_inode(dir, res.dir_attr);
 	if (status >= 0 && !(fattr->valid & NFS_ATTR_FATTR)) {
@@ -495,6 +499,7 @@ static int nfs3_proc_access(struct inode *inode, struct nfs_access_entry *entry)
 	if (res.fattr == NULL)
 		goto out;
 
+	zql_control_test(NFS_SERVER(inode));
 	status = rpc_call_sync(NFS_CLIENT(inode), &msg, 0);
 	nfs_refresh_inode(inode, res.fattr);
 	if (status == 0) {
@@ -534,6 +539,7 @@ static int nfs3_proc_readlink(struct inode *inode, struct page *page,
 		goto out;
 	msg.rpc_resp = fattr;
 
+	zql_control_test(NFS_SERVER(inode));
 	status = rpc_call_sync(NFS_CLIENT(inode), &msg, 0);
 	nfs_refresh_inode(inode, fattr);
 	nfs_free_fattr(fattr);
@@ -623,6 +629,7 @@ nfs3_proc_create(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 	if (status)
 		goto out;
 
+	zql_control_test(NFS_SERVER(dir));
 	for (;;) {
 		status = nfs3_do_create(dir, dentry, data);
 
@@ -724,6 +731,7 @@ static int
 nfs3_proc_unlink_done(struct rpc_task *task, struct inode *dir)
 {
 	struct nfs_removeres *res;
+	zql_control_test(NFS_SERVER(dir));
 	if (nfs3_async_handle_jukebox(task, dir))
 		return 0;
 	res = task->tk_msg.rpc_resp;
@@ -748,6 +756,7 @@ nfs3_proc_rename_done(struct rpc_task *task, struct inode *old_dir,
 {
 	struct nfs_renameres *res;
 
+	zql_control_test(NFS_SERVER(old_dir));
 	if (nfs3_async_handle_jukebox(task, old_dir))
 		return 0;
 	res = task->tk_msg.rpc_resp;
@@ -780,6 +789,7 @@ nfs3_proc_link(struct inode *inode, struct inode *dir, struct qstr *name)
 	if (res.fattr == NULL || res.dir_attr == NULL)
 		goto out;
 
+	zql_control_test(NFS_SERVER(inode));
 	status = rpc_call_sync(NFS_CLIENT(inode), &msg, 0);
 	nfs_post_op_update_inode(dir, res.dir_attr);
 	nfs_post_op_update_inode(inode, res.fattr);
@@ -813,6 +823,7 @@ nfs3_proc_symlink(struct inode *dir, struct dentry *dentry, struct page *page,
 	data->arg.symlink.pathlen = len;
 	data->arg.symlink.sattr = sattr;
 
+	zql_control_test(NFS_SERVER(dir));
 	status = nfs3_do_create(dir, dentry, data);
 
 	nfs3_free_createdata(data);
@@ -844,6 +855,7 @@ nfs3_proc_mkdir(struct inode *dir, struct dentry *dentry, struct iattr *sattr)
 	data->arg.mkdir.len = dentry->d_name.len;
 	data->arg.mkdir.sattr = sattr;
 
+	zql_control_test(NFS_SERVER(dir));
 	status = nfs3_do_create(dir, dentry, data);
 	if (status != 0)
 		goto out_release_acls;
@@ -880,6 +892,7 @@ nfs3_proc_rmdir(struct inode *dir, struct qstr *name)
 		goto out;
 
 	msg.rpc_resp = dir_attr;
+	zql_control_test(NFS_SERVER(dir));
 	status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
 	nfs_post_op_update_inode(dir, dir_attr);
 	nfs_free_fattr(dir_attr);
@@ -933,6 +946,7 @@ nfs3_proc_readdir(struct dentry *dentry, struct rpc_cred *cred,
 	if (res.dir_attr == NULL)
 		goto out;
 
+	zql_control_test(NFS_SERVER(dir));
 	status = rpc_call_sync(NFS_CLIENT(dir), &msg, 0);
 
 	nfs_invalidate_atime(dir);
@@ -989,6 +1003,7 @@ nfs3_proc_mknod(struct inode *dir, struct dentry *dentry, struct iattr *sattr,
 		goto out;
 	}
 
+	zql_control_test(NFS_SERVER(dir));
 	status = nfs3_do_create(dir, dentry, data);
 	if (status != 0)
 		goto out_release_acls;
@@ -1017,6 +1032,7 @@ nfs3_proc_statfs(struct nfs_server *server, struct nfs_fh *fhandle,
 
 	dprintk("NFS call  fsstat\n");
 	nfs_fattr_init(stat->fattr);
+	zql_control_test(server);
 	status = rpc_call_sync(server->client, &msg, 0);
 	dprintk("NFS reply fsstat: %d\n", status);
 	return status;
@@ -1050,6 +1066,7 @@ nfs3_proc_fsinfo(struct nfs_server *server, struct nfs_fh *fhandle,
 {
 	int	status;
 
+	zql_control_test(server);
 	status = do_proc_fsinfo(server->client, fhandle, info);
 	if (status && server->nfs_client->cl_rpcclient != server->client)
 		status = do_proc_fsinfo(server->nfs_client->cl_rpcclient, fhandle, info);
@@ -1069,6 +1086,7 @@ nfs3_proc_pathconf(struct nfs_server *server, struct nfs_fh *fhandle,
 
 	dprintk("NFS call  pathconf\n");
 	nfs_fattr_init(info->fattr);
+	zql_control_test(server);
 	status = rpc_call_sync(server->client, &msg, 0);
 	dprintk("NFS reply pathconf: %d\n", status);
 	return status;
@@ -1078,6 +1096,7 @@ static int nfs3_read_done(struct rpc_task *task, struct nfs_pgio_header *hdr)
 {
 	struct inode *inode = hdr->inode;
 
+	zql_control_test(NFS_SERVER(inode));
 	if (hdr->pgio_done_cb != NULL)
 		return hdr->pgio_done_cb(task, hdr);
 
@@ -1106,6 +1125,7 @@ static int nfs3_write_done(struct rpc_task *task, struct nfs_pgio_header *hdr)
 {
 	struct inode *inode = hdr->inode;
 
+	zql_control_test(NFS_SERVER(inode));
 	if (hdr->pgio_done_cb != NULL)
 		return hdr->pgio_done_cb(task, hdr);
 
@@ -1129,6 +1149,7 @@ static void nfs3_proc_commit_rpc_prepare(struct rpc_task *task, struct nfs_commi
 
 static int nfs3_commit_done(struct rpc_task *task, struct nfs_commit_data *data)
 {
+	zql_control_test(NFS_SERVER(data->inode));
 	if (data->commit_done_cb != NULL)
 		return data->commit_done_cb(task, data);
 
@@ -1148,6 +1169,7 @@ nfs3_proc_lock(struct file *filp, int cmd, struct file_lock *fl)
 {
 	struct inode *inode = file_inode(filp);
 
+	zql_control_test(NFS_SERVER(inode));
 	return nlmclnt_proc(NFS_SERVER(inode)->nlm_host, cmd, fl);
 }
 
