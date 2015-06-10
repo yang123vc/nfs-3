@@ -182,40 +182,26 @@ out_no_address:
 	return -EINVAL;
 }
 
-static void migrate_init_new_nfs_server(struct nfs_server *server)
-{
-	/* since we use the original server directly, the parameters that 
-	 * need to be copied through nfs_server_copy_userdata() are not 
-	 * needed any more */
-	//nfs_server_copy_userdata();
-	/* the following initialization is not necessarily needed */
-	server->nfs_client = NULL;
-	server->client = NULL;
-	server->client_acl = NULL;
-	server->nlm_host = NULL;
-	server->io_stats = NULL;
-}
-
-static void migrate_nfs_set_client(struct nfs_server *server,
-					const struct nfs_parsed_mount_data *data,
-					struct nfs_subversion *nfs_mod,
-					const struct rpc_timeout *timeparms)
+static int migrate_nfs_set_client(struct nfs_server *server,
+					const char *hostname,
+					const struct sockaddr *addr,
+					const size_t addrlen,
+					const char *ip_addr,
+					rpc_authflavor_t authflavour,
+					int proto, const struct rpc_timeout *timeparms,
+					u32 minorversion, struct net *net)
 {
 	struct nfs_client_initdata cl_init = {
-		.hostname = data->nfs_server.hostname,
-		.addr = (const struct sockaddr *)&data->nfs_server.address,
-		.addrlen = data->nfs_server.addrlen,
-		.nfs_mod = nfs_mod,
-		.proto = data->nfs_server.protocol,
-		.net = data->net,
+		.hostname = hostname,
+		.addr = addr,
+		.addrlen = addrlen,
+		.nfs_mod = &nfs_v3,
+		.proto = proto,
+		.minorversion = minorversion,
+		.net = net,
 	};
 	struct nfs_client *clp;
 	int error;
-
-	/* init timeparms */
-	//struct rpc_timeout timeparms;
-	//nfs_init_timeout_values(&timeparms, data->nfs_server.protocol,
-	//		data->timeo, data->retrans);
 
 	dfprintk(MOUNT, "zql: migrate_nfs_set_client\n");
 
@@ -224,18 +210,110 @@ static void migrate_nfs_set_client(struct nfs_server *server,
 	//if (server->options & NFS_OPTION_MIGRATION)
 		//set_bit(NFS_CS_MIGRATION, &cl_init.init_flags);
 	
-	clp = nfs_get_client(&cl_init, timeparms, NULL, RPC_AUTH_UNIX);
+	clp = nfs_get_client(&cl_init, timeparms, ip_addr, authflavour);
 	if (IS_ERR(clp)) {
 		error = PTR_ERR(clp);
 		dfprintk(MOUNT, "zql: nfs_get_client error\n");
+		goto error;
 	}
 
-	server->nfs_client = clp;
-	//set_bit(NFS_CS_CHECK_LEASE_TIME, &clp->cl_res_state);
-	
+	set_bit(NFS_CS_CHECK_LEASE_TIME, &clp->cl_res_state);
 
-	dfprintk(MOUNT, "zql: migrate_nfs_set_client done\n");
-	return;
+	server->nfs_client = clp;
+	dfprintk(MOUNT, "zql: <-- migrate_nfs_set_client() = 0 [new %p]\n", clp);
+	return 0;
+error:
+	dfprintk(MOUNT, "zql: <-- migrate_nfs_set_client() = xerror %d\n", error);
+	return error;
+}
+
+static int migrate_nfs_probe_destination(struct nfs_server *server)
+{
+	struct inode *inode = server->super->s_root->d_inode;
+	struct nfs_fattr *fattr;
+	int error;
+
+	fattr = nfs_alloc_fattr();
+	if (fattr == NULL)
+		return -ENOMEM;
+	
+	error = nfs_probe_fsinfo(server, NFS_FH(inode), fattr);
+
+	nfs_free_fattr(fattr);
+	return error;
+}
+
+int migrate_nfs_update_server(struct nfs_server *server, const char *hostname,
+			struct sockaddr *sap, size_t salen, struct net *net)
+{
+	struct nfs_client *clp = server->nfs_client;
+	struct rpc_clnt *clnt = server->client;
+	struct xprt_create xargs = {
+		.ident		= clp->cl_proto,
+		.net		= net,
+		.dstaddr	= sap,
+		.addrlen	= salen,
+		.servername	= hostname,
+	};
+	char buf[INET6_ADDRSTRLEN + 1];
+	struct sockaddr_storage address;
+	struct sockaddr *localaddr = (struct sockaddr *)&address;
+	int error;
+
+	dfprintk(MOUNT, "zql: --> %s: move FSID %llx:%llx to \"%s\")\n", __func__,
+			(unsigned long long)server->fsid.major,
+			(unsigned long long)server->fsid.minor,
+			hostname);
+	
+	error = rpc_switch_client_transport(clnt, &xargs, clnt->cl_timeout);
+	if (error != 0) {
+		dfprintk(MOUNT, "zql: <-- %s(): rpc_switch_client_transport returned %d\n",
+			__func__, error);
+		goto out;
+	}
+
+	error = rpc_localaddr(clnt, localaddr, sizeof(address));
+	if (error != 0) {
+		dfprintk(MOUNT, "zql: <-- %s(): rpc_localaddr returned %d\n",
+			__func__, error);
+		goto out;
+	}
+
+	error = -EAFNOSUPPORT;
+	if (rpc_ntop(localaddr, buf, sizeof(buf)) == 0) {
+		dfprintk(MOUNT, "zql: <-- %s(): rpc_ntop returned %d\n",
+			__func__, error);
+		goto out;
+	}
+
+	nfs_server_remove_lists(server);
+	error = migrate_nfs_set_client(server, hostname, sap, salen, buf,
+				clp->cl_rpcclient->cl_auth->au_flavor,
+				clp->cl_proto, clnt->cl_timeout,
+				clp->cl_minorversion, net);
+	nfs_put_client(clp);
+	if (error != 0) {
+		nfs_server_insert_lists(server);
+		dfprintk(MOUNT, "zql: <-- %s(): nfs4_set_client returned %d\n",
+			__func__, error);
+		goto out;
+	}
+
+	if (server->nfs_client->cl_hostname == NULL)
+		server->nfs_client->cl_hostname = kstrdup(hostname, GFP_KERNEL);
+	nfs_server_insert_lists(server);
+
+	error = migrate_nfs_probe_destination(server);
+	if (error < 0) {
+		dfprintk(MOUNT, "zql: error in migrate_nfs_probe_destination\n");
+		goto out;
+	}
+	
+	dfprintk(MOUNT, "zql: <-- %s() succeeded\n", __func__);
+
+out:
+	dfprintk(MOUNT, "zql: error in %s()\n", __func__);
+	return error;
 }
 
 static void zql_update_server(struct nfs_server *server)
@@ -247,19 +325,16 @@ static void zql_update_server(struct nfs_server *server)
 	//nfs_free_server(server);
 	/* free old nfs_client, though we can leave it there and use it when switch back */
 	//server->nfs_client->rpc_ops->free_client(server->nfs_client);
-	struct nfs_server parent_server;
-	struct nfs_client *parent_client;
-	struct nfs_subversion *nfs_mod;
+	//struct nfs_server parent_server;
+	//struct nfs_client *parent_client;
+	//struct nfs_subversion *nfs_mod;
 	struct nfs_parsed_mount_data *parsed;
-	//char *dev_name = NULL;
 
 	//char raw_data[] = "addr=162.105.146.169,vers=3,proto=tcp,mountvers=3,mountproto=udp,mountport=20048";
 
 	/* keep old server parameter, copy original server to a temporary parameter */
-	parent_server = *server;
-	parent_client = parent_server.nfs_client;
-	/* generate new nfs_server, set several pointers as NULL */
-	migrate_init_new_nfs_server(server);
+	//parent_server = *server;
+	//parent_client = parent_server.nfs_client;
 
 	/* generate nfs_parsed_mount_data */
 	parsed = nfs_alloc_parsed_mount_data();
@@ -268,13 +343,16 @@ static void zql_update_server(struct nfs_server *server)
 	/* init nfs_parsed_mount_data */
 	migrate_nfs_validate_text_mount_data(/*raw_data, */parsed/*, dev_name*/);
 
-	nfs_mod = get_nfs_version(parsed->version);
-	if (IS_ERR(nfs_mod))
-		dfprintk(MOUNT, "zql: get_nfs_version error\n");
-	/* init server->nfs_client */
-	migrate_nfs_set_client(server, parsed, nfs_mod, parent_server.client->cl_timeout);
+	migrate_nfs_update_server(server, parsed->nfs_server.hostname, (struct sockaddr *)&parsed->nfs_server.address, 
+				parsed->nfs_server.addrlen, parsed->net);
 
-	nfs_init_server_rpcclient(server, parent_server.client->cl_timeout, parsed->selected_flavor);
+	/*nfs_mod = get_nfs_version(parsed->version);
+	if (IS_ERR(nfs_mod))
+		dfprintk(MOUNT, "zql: get_nfs_version error\n");*/
+	/* init server->nfs_client */
+	//migrate_nfs_set_client(server, parsed, nfs_mod, parent_server.client->cl_timeout);
+
+	//nfs_init_server_rpcclient(server, parent_server.client->cl_timeout, parsed->selected_flavor);
 
 	//put_nfs_version(nfs_mod);
 
@@ -388,8 +466,8 @@ nfs3_proc_getattr(struct nfs_server *server, struct nfs_fh *fhandle,
 	int	status;
 
 	dprintk("NFS call  getattr\n");
-	nfs_fattr_init(fattr);
 	zql_control_test(server);
+	nfs_fattr_init(fattr);
 	status = rpc_call_sync(server->client, &msg, 0);
 	dprintk("NFS reply getattr: %d\n", status);
 	return status;
