@@ -182,7 +182,7 @@ out_no_address:
 	return -EINVAL;
 }
 
-static void migrate_generate_new_nfs_server(struct nfs_server *server)
+static void migrate_init_new_nfs_server(struct nfs_server *server)
 {
 	/* since we use the original server directly, the parameters that 
 	 * need to be copied through nfs_server_copy_userdata() are not 
@@ -259,18 +259,24 @@ static void zql_update_server(struct nfs_server *server)
 	parent_server = *server;
 	parent_client = parent_server.nfs_client;
 	/* generate new nfs_server, set several pointers as NULL */
-	migrate_generate_new_nfs_server(server);
+	migrate_init_new_nfs_server(server);
 
 	/* generate nfs_parsed_mount_data */
 	parsed = nfs_alloc_parsed_mount_data();
 	if (parsed == NULL)
 		dfprintk(MOUNT, "zql: nfs_alloc_parsed_mount_data error\n");
+	/* init nfs_parsed_mount_data */
 	migrate_nfs_validate_text_mount_data(/*raw_data, */parsed/*, dev_name*/);
 
 	nfs_mod = get_nfs_version(parsed->version);
+	if (IS_ERR(nfs_mod))
+		dfprintk(MOUNT, "zql: get_nfs_version error\n");
+	/* init server->nfs_client */
 	migrate_nfs_set_client(server, parsed, nfs_mod, parent_server.client->cl_timeout);
 
 	nfs_init_server_rpcclient(server, parent_server.client->cl_timeout, parsed->selected_flavor);
+
+	//put_nfs_version(nfs_mod);
 
 	nfs_free_parsed_mount_data(parsed);
 
