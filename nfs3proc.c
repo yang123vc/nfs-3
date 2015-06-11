@@ -122,7 +122,67 @@ static void nfs_set_port(struct sockaddr *sap, int *port,
 	rpc_set_port(sap, *port);
 }
 
-static int migrate_nfs_validate_text_mount_data(/*void *options,*/
+static int migrate_nfs_validate_text_mount_data168(/*void *options,*/
+					struct nfs_parsed_mount_data *args/*,
+					const char *dev_name*/)
+{
+	int port = 0;
+	//int max_namelen = PAGE_SIZE;
+	//int max_pathlen = NFS_MAXPATHLEN;
+	struct sockaddr *sap = (struct sockaddr *)&args->nfs_server.address;
+	char mnt_addr[] = "162.105.146.168";
+	char mnt_hostname[] = "162.105.146.168";
+	char mnt_dirpath[] = "/home/disk1";
+
+	//if (nfs_parse_mount_options((char *)options, args) == 0)
+	//	return -EINVAL;
+	/* security_sb_parse_opts_str() */
+	/* address */
+	args->nfs_server.addrlen = 
+		rpc_pton(args->net, mnt_addr, strlen(mnt_addr),
+			(struct sockaddr *)
+			&args->nfs_server.address,
+			sizeof(args->nfs_server.address));
+	if (args->nfs_server.addrlen == 0)
+		dfprintk(MOUNT, "zql: invalid address\n");
+	/* version vers=3 */
+	args->flags |= NFS_MOUNT_VER3;
+	args->version = 3;
+	/* proto=tcp, Opt_xprt_tcp */
+	args->flags |= NFS_MOUNT_TCP;
+	args->nfs_server.protocol = XPRT_TRANSPORT_TCP;
+	/* mountvers=3 */
+	args->mount_server.version = 3;
+	/* mountproto=udp */
+	args->mount_server.protocol = XPRT_TRANSPORT_UDP;
+	/* mountport=20048 */
+	args->mount_server.port = 20048;
+
+	if (!nfs_verify_server_address(sap))
+		goto out_no_address;
+
+	if (args->version == 4) {
+		dfprintk(MOUNT, "zql: version 4 error not supported\n");
+	} else
+		nfs_set_mount_transport_protocol(args);
+
+	nfs_set_port(sap, &args->nfs_server.port, port);
+
+	//return nfs_parse_devname(dev_name,
+	//			   &args->nfs_server.hostname,
+	//			   max_namelen,
+	//			   &args->nfs_server.export_path,
+	//			   max_pathlen);
+	args->nfs_server.hostname = kstrndup(mnt_hostname, strlen(mnt_hostname), GFP_KERNEL);
+	args->nfs_server.export_path = kstrndup(mnt_dirpath, strlen(mnt_dirpath), GFP_KERNEL);
+	return 0;
+
+out_no_address:
+	dfprintk(MOUNT, "zql: NFS: mount program didn't pass remote address\n");
+	return -EINVAL;
+}
+
+static int migrate_nfs_validate_text_mount_data169(/*void *options,*/
 					struct nfs_parsed_mount_data *args/*,
 					const char *dev_name*/)
 {
@@ -341,7 +401,12 @@ static void zql_update_server(struct nfs_server *server)
 	if (parsed == NULL)
 		dfprintk(MOUNT, "zql: nfs_alloc_parsed_mount_data error\n");
 	/* init nfs_parsed_mount_data */
-	migrate_nfs_validate_text_mount_data(/*raw_data, */parsed/*, dev_name*/);
+	if (nfs_zql_control == 168)
+		migrate_nfs_validate_text_mount_data168(/*raw_data, */parsed/*, dev_name*/);
+	else if (nfs_zql_control == 169)
+		migrate_nfs_validate_text_mount_data169(parsed);
+	else
+		dfprintk(MOUNT, "zql: nfs_zql_control error\n");
 
 	migrate_nfs_update_server(server, parsed->nfs_server.hostname, (struct sockaddr *)&parsed->nfs_server.address, 
 				parsed->nfs_server.addrlen, parsed->net);
@@ -368,7 +433,7 @@ static void zql_control_test(struct nfs_server *server)
 		while (nfs_zql_control == 5) {
 			msleep_interruptible(500);
 		}
-		if (nfs_zql_control == 6) {
+		if (nfs_zql_control == 168 || nfs_zql_control == 169) {
 			dfprintk(MOUNT, "zql: switch succeed\n");
 			dfprintk(MOUNT, "zql: start update server\n");
 			zql_update_server(server);
