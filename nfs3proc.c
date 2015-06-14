@@ -429,7 +429,6 @@ static void zql_update_server(struct nfs_server *server)
 	return;
 }
 
-
 static void zql_control_test(struct nfs_server *server)
 {
 	if (nfs_zql_control == 5 || nfs_zql_control == 168
@@ -447,6 +446,7 @@ static void zql_control_test(struct nfs_server *server)
 				dfprintk(MOUNT, "zql: start update server\n");
 				zql_update_server(server);
 				switch_status = 0;
+				nfs_zql_control = 10;
 				dfprintk(MOUNT, "zql: update server done\n");
 			} else {
 				spin_unlock(&zql_switch_status);
