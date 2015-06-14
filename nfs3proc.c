@@ -21,6 +21,7 @@
 #include <linux/xattr.h>
 #include <linux/delay.h>
 #include <linux/sunrpc/addr.h>
+#include <linux/spinlock.h>
 
 #include "iostat.h"
 #include "internal.h"
@@ -30,6 +31,8 @@
 #define NFSDBG_FACILITY		NFSDBG_PROC
 
 int nfs_zql_control = 10;
+static DEFINE_SPINLOCK(zql_switch_status);
+static int switch_status = 0;
 
 static struct nfs_parsed_mount_data *nfs_alloc_parsed_mount_data(void)
 {
@@ -426,18 +429,31 @@ static void zql_update_server(struct nfs_server *server)
 	return;
 }
 
+
 static void zql_control_test(struct nfs_server *server)
 {
-	if (nfs_zql_control == 5) {
-		dfprintk(MOUNT, "zql: control succeed\n");
+	if (nfs_zql_control == 5 || nfs_zql_control == 168
+				|| nfs_zql_control == 169) {
+		dfprintk(MOUNT, "zql: control start ...\n");
 		while (nfs_zql_control == 5) {
 			msleep_interruptible(500);
 		}
 		if (nfs_zql_control == 168 || nfs_zql_control == 169) {
-			dfprintk(MOUNT, "zql: switch succeed\n");
-			dfprintk(MOUNT, "zql: start update server\n");
-			zql_update_server(server);
-			dfprintk(MOUNT, "zql: update server done\n");
+			spin_lock(&zql_switch_status);
+			if (switch_status == 0) {
+				switch_status = 1;
+				spin_unlock(&zql_switch_status);
+				dfprintk(MOUNT, "zql: switch succeed\n");
+				dfprintk(MOUNT, "zql: start update server\n");
+				zql_update_server(server);
+				switch_status = 0;
+				dfprintk(MOUNT, "zql: update server done\n");
+			} else {
+				spin_unlock(&zql_switch_status);
+				while (switch_status == 1) {
+					msleep_interruptible(100);
+				}
+			}
 		}
 		else if (nfs_zql_control == 4)
 			dfprintk(MOUNT, "zql: switch failed\n");
